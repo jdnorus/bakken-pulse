@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "ingest:nd": "tsx --env-file=.env.local scripts/ingest-nd-oil-gas.ts",
+    "ingest:nd": "tsx scripts/ingest-nd-oil-gas.ts",
     "ingest:nd:cron": "bash scripts/cron-ingest-hourly.sh"
   },
   "dependencies": {
