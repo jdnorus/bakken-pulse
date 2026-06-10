@@ -26,10 +26,12 @@ export async function getOpportunities(): Promise<DataResult<OpportunitiesData>>
     return { data: mockOpportunities(), source: "mock" };
   }
 
-  return {
-    data: scoreOpportunitiesFromActivity(permits, operators),
-    source,
-  };
+  const data = scoreOpportunitiesFromActivity(permits, operators);
+  if (data.opportunities.length === 0) {
+    return { data: mockOpportunities(), source: "mock" };
+  }
+
+  return { data, source };
 }
 
 export { dataSourceLabel };

@@ -44,6 +44,7 @@ import {
   saveLead,
   summarizeSavedLeads,
 } from "@/lib/opportunities/saved-leads";
+import type { DataSource } from "@/lib/types";
 import type {
   ConfidenceLevel,
   OpportunitiesData,
@@ -73,10 +74,15 @@ function scoreBarClass(score: number): string {
 
 interface OpportunitiesDashboardProps {
   data: OpportunitiesData;
+  source: DataSource;
   sourceLabel: string;
 }
 
-export function OpportunitiesDashboard({ data, sourceLabel }: OpportunitiesDashboardProps) {
+export function OpportunitiesDashboard({
+  data,
+  source,
+  sourceLabel,
+}: OpportunitiesDashboardProps) {
   const [filters, setFilters] = useState<OpportunityFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<OpportunitySortKey>("score");
   const [savedLeads, setSavedLeads] = useState<SavedLead[]>(() => loadSavedLeads());
@@ -107,6 +113,22 @@ export function OpportunitiesDashboard({ data, sourceLabel }: OpportunitiesDashb
 
   return (
     <div className="space-y-8">
+      {source === "mock" && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="pt-6 text-sm">
+            <p className="font-medium text-foreground">Showing preview leads only</p>
+            <p className="mt-1 text-muted-foreground">
+              Supabase is not connected on this deployment. Add{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+              <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+              </code>{" "}
+              in your Vercel project settings, then redeploy to load live ND permit data.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-card to-card">
         <CardHeader className="border-b border-primary/10">
           <div className="flex flex-wrap items-start justify-between gap-4">
