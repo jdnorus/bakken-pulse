@@ -11,6 +11,7 @@ import {
   Building2,
   FileText,
   Droplets,
+  Target,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const nav = [
   { href: "/permits", label: "Permits", icon: FileText },
   { href: "/operators", label: "Operators", icon: Building2 },
   { href: "/counties", label: "Counties", icon: MapPinned },
+  { href: "/opportunities", label: "Opportunities", icon: Target },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },
 ] as const;

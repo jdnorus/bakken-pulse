@@ -107,9 +107,9 @@ export default function SettingsPage() {
                 public DMR MapServer wells layer).
               </p>
               <p>
-                <strong className="text-foreground">Scheduled ingest (hourly):</strong> GitHub Actions (
+                <strong className="text-foreground">Scheduled ingest:</strong> GitHub Actions hourly (
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">.github/workflows/ingest-nd.yml</code>
-                ), Vercel Cron (
+                ), Vercel Cron daily on Hobby (
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">/api/cron/ingest-nd</code> +{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-xs">CRON_SECRET</code>
                 ), or local{" "}

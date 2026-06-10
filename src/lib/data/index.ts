@@ -6,3 +6,4 @@ export { getActivityEvents } from "./activity-events";
 export { getAlerts } from "./alerts";
 export { getCurrentRiskSummary } from "./risk-summaries";
 export { getDashboard } from "./dashboard";
+export { getOpportunities } from "./opportunities";
