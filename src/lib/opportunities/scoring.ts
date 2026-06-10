@@ -8,13 +8,30 @@ import type {
 } from "@/lib/opportunities/types";
 import { DEMAND_CATEGORIES } from "@/lib/opportunities/types";
 
-/** Deterministic 0–1 noise from a string seed (mock AI signal). */
-function seedNoise(seed: string): number {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) {
-    h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  }
-  return (h % 1000) / 1000;
+/** Category demand coefficients by operational context (field-services model). */
+const PERMIT_CATEGORY_WEIGHTS: Record<
+  DemandCategory,
+  { drilling: number; completion: number; default: number }
+> = {
+  Welding: { drilling: 0.62, completion: 0.78, default: 0.45 },
+  "Dirt work": { drilling: 0.95, completion: 0.55, default: 0.4 },
+  "Water hauling": { drilling: 0.9, completion: 0.5, default: 0.35 },
+  Electrical: { drilling: 0.72, completion: 0.68, default: 0.5 },
+  Rentals: { drilling: 0.88, completion: 0.42, default: 0.38 },
+  "Safety services": { drilling: 0.8, completion: 0.7, default: 0.55 },
+};
+
+const OPERATOR_CATEGORY_WEIGHTS: Record<DemandCategory, number> = {
+  Welding: 0.68,
+  "Dirt work": 0.82,
+  "Water hauling": 0.76,
+  Electrical: 0.64,
+  Rentals: 0.86,
+  "Safety services": 0.74,
+};
+
+function clamp(n: number, min = 0, max = 1): number {
+  return Math.min(max, Math.max(min, n));
 }
 
 function daysSince(isoDate: string): number {
@@ -23,105 +40,141 @@ function daysSince(isoDate: string): number {
   return Math.max(0, (Date.now() - filed) / (1000 * 60 * 60 * 24));
 }
 
-function statusMultiplier(status: string): number {
+function recencyScore(days: number): number {
+  if (days <= 7) return 1;
+  if (days <= 30) return 0.85;
+  if (days <= 60) return 0.65;
+  if (days <= 90) return 0.45;
+  return 0.25;
+}
+
+function statusIntensity(status: string): number {
   const s = status.toLowerCase();
   if (s.includes("drill") || s === "drl") return 1;
-  if (s.includes("approved")) return 0.85;
-  if (s.includes("review")) return 0.65;
-  return 0.5;
+  if (s.includes("approved")) return 0.82;
+  if (s.includes("review")) return 0.6;
+  if (s.includes("bond")) return 0.5;
+  return 0.4;
 }
 
-function categoryWeightsForPermit(
-  permit: Permit,
-): Record<DemandCategory, number> {
-  const status = statusMultiplier(permit.status);
+function permitContext(permit: Permit): "drilling" | "completion" | "default" {
   const type = permit.permitType.toLowerCase();
-  const isDrilling = type.includes("drill") || type.includes("oil");
-  const isRecomplete = type.includes("recomp");
-  const recency = Math.max(0.4, 1 - daysSince(permit.filedAt) / 120);
-  const base = status * recency;
-
-  return {
-    Welding: clamp(base * (isDrilling ? 0.72 : 0.45) + seedNoise(permit.id + "weld") * 0.15),
-    "Dirt work": clamp(base * (isDrilling ? 0.95 : 0.55) + seedNoise(permit.id + "dirt") * 0.12),
-    "Water hauling": clamp(base * (isDrilling ? 0.88 : 0.5) + seedNoise(permit.id + "water") * 0.14),
-    Electrical: clamp(base * (isDrilling ? 0.7 : 0.6) + seedNoise(permit.id + "elec") * 0.13),
-    Rentals: clamp(base * (isDrilling ? 0.92 : 0.48) + seedNoise(permit.id + "rent") * 0.1),
-    "Safety services": clamp(base * 0.8 + seedNoise(permit.id + "safe") * 0.12),
-  };
+  const status = permit.status.toLowerCase();
+  if (type.includes("recomp") || status.includes("complet")) return "completion";
+  if (type.includes("drill") || type.includes("oil") || status.includes("drill") || status === "drl") {
+    return "drilling";
+  }
+  return "default";
 }
 
-function categoryWeightsForOperator(
-  operator: Operator,
-  countyPermitDensity: number,
-): Record<DemandCategory, number> {
-  const activity = Math.min(1, operator.permitsYtd / 40);
-  const rigs = Math.min(1, operator.rigs / 8);
-  const density = Math.min(1, countyPermitDensity / 20);
-  const base = clamp(activity * 0.5 + rigs * 0.35 + density * 0.15);
-
-  return {
-    Welding: clamp(base * 0.7 + seedNoise(operator.id + "weld") * 0.2),
-    "Dirt work": clamp(base * 0.85 + seedNoise(operator.id + "dirt") * 0.15),
-    "Water hauling": clamp(base * 0.8 + seedNoise(operator.id + "water") * 0.18),
-    Electrical: clamp(base * 0.65 + seedNoise(operator.id + "elec") * 0.15),
-    Rentals: clamp(base * 0.9 + seedNoise(operator.id + "rent") * 0.12),
-    "Safety services": clamp(base * 0.75 + seedNoise(operator.id + "safe") * 0.15),
-  };
-}
-
-function clamp(n: number, min = 0, max = 1): number {
-  return Math.min(max, Math.max(min, n));
-}
-
-function toScore(weight: number): number {
-  return Math.round(clamp(weight) * 100);
-}
-
-function toConfidence(score: number, recencyDays?: number): ConfidenceLevel {
-  if (score >= 75 && (recencyDays === undefined || recencyDays <= 45)) return "high";
-  if (score >= 50) return "medium";
+function toConfidence(
+  score: number,
+  signalStrength: number,
+  recencyDays: number,
+): ConfidenceLevel {
+  if (score >= 72 && signalStrength >= 0.65 && recencyDays <= 45) return "high";
+  if (score >= 48 && signalStrength >= 0.4) return "medium";
   return "low";
 }
 
-function rationaleForPermit(permit: Permit, category: DemandCategory, score: number): string {
-  return `Mock model: ${category} demand inferred from ${permit.status} status, ${permit.permitType} permit type, and ${permit.filedAt} filing date (score ${score}).`;
+function buildCountyHeat(countyPermitCounts: Map<string, number>): Map<string, number> {
+  const max = Math.max(1, ...countyPermitCounts.values());
+  const heat = new Map<string, number>();
+  for (const [county, count] of countyPermitCounts) {
+    heat.set(county, count / max);
+  }
+  return heat;
 }
 
-function rationaleForOperator(operator: Operator, category: DemandCategory, score: number): string {
-  return `Mock model: ${category} demand inferred from ${operator.permitsYtd} YTD permits and ${operator.rigs} active rig proxy (score ${score}).`;
+function operatorPrimaryCounty(
+  operator: Operator,
+  permits: Permit[],
+  countyHeat: Map<string, number>,
+): string {
+  const byCounty = new Map<string, number>();
+  for (const p of permits) {
+    if (p.operatorName === operator.name) {
+      byCounty.set(p.countyName, (byCounty.get(p.countyName) ?? 0) + 1);
+    }
+  }
+  if (byCounty.size > 0) {
+    return [...byCounty.entries()].sort((a, b) => b[1] - a[1])[0]![0];
+  }
+  const focus = operator.focus?.split("/")[0]?.trim();
+  if (focus) return focus;
+  return [...countyHeat.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "McKenzie";
 }
 
-function scorePermit(permit: Permit): ServiceOpportunity[] {
-  const weights = categoryWeightsForPermit(permit);
-  const recency = daysSince(permit.filedAt);
+function latestOperatorActivity(operator: Operator, permits: Permit[]): string {
+  const dates = permits
+    .filter((p) => p.operatorName === operator.name)
+    .map((p) => p.filedAt)
+    .sort()
+    .reverse();
+  if (dates[0]) return `${dates[0]}T12:00:00.000Z`;
+  return new Date().toISOString();
+}
 
-  return DEMAND_CATEGORIES.map((category) => {
-    const opportunityScore = toScore(weights[category]);
-    return {
+function scorePermit(
+  permit: Permit,
+  countyHeat: number,
+): { opportunities: ServiceOpportunity[]; signals: Record<DemandCategory, number> } {
+  const ctx = permitContext(permit);
+  const recencyDays = daysSince(permit.filedAt);
+  const recency = recencyScore(recencyDays);
+  const status = statusIntensity(permit.status);
+  const heat = countyHeat;
+
+  const opportunities: ServiceOpportunity[] = [];
+  const signals: Record<DemandCategory, number> = {} as Record<DemandCategory, number>;
+
+  for (const category of DEMAND_CATEGORIES) {
+    const coef = PERMIT_CATEGORY_WEIGHTS[category][ctx];
+    const signalStrength = clamp(recency * 0.4 + status * 0.35 + heat * 0.25);
+    signals[category] = signalStrength;
+
+    const raw = signalStrength * coef;
+    const opportunityScore = Math.round(clamp(raw) * 100);
+    const confidence = toConfidence(opportunityScore, signalStrength, recencyDays);
+
+    opportunities.push({
       id: `permit-${permit.id}-${category.toLowerCase().replace(/\s+/g, "-")}`,
-      entityType: "permit" as const,
+      entityType: "permit",
       entityId: permit.id,
       entityLabel: permit.wellName,
       operatorName: permit.operatorName,
       countyName: permit.countyName,
       demandCategory: category,
       opportunityScore,
-      confidence: toConfidence(opportunityScore, recency),
-      rationale: rationaleForPermit(permit, category, opportunityScore),
-    };
-  }).filter((o) => o.opportunityScore >= 40);
+      confidence,
+      activityAt: `${permit.filedAt}T12:00:00.000Z`,
+      signalStrength: Math.round(signalStrength * 100) / 100,
+      rationale: `Activity model: ${category} demand from ${permit.status} permit in ${permit.countyName} (filed ${permit.filedAt}). Signals — recency ${Math.round(recency * 100)}%, status ${Math.round(status * 100)}%, county heat ${Math.round(heat * 100)}%.`,
+    });
+  }
+
+  return { opportunities, signals };
 }
 
 function scoreOperator(
   operator: Operator,
   countyName: string,
-  countyPermitCount: number,
+  countyHeat: number,
+  permits: Permit[],
 ): ServiceOpportunity[] {
-  const weights = categoryWeightsForOperator(operator, countyPermitCount);
+  const activityScale = clamp(operator.permitsYtd / 50);
+  const rigScale = clamp(operator.rigs / 10);
+  const heat = countyHeat;
+  const activityAt = latestOperatorActivity(operator, permits);
+  const recencyDays = daysSince(activityAt.slice(0, 10));
 
   return DEMAND_CATEGORIES.map((category) => {
-    const opportunityScore = toScore(weights[category]);
+    const coef = OPERATOR_CATEGORY_WEIGHTS[category];
+    const signalStrength = clamp(activityScale * 0.45 + rigScale * 0.35 + heat * 0.2);
+    const raw = signalStrength * coef;
+    const opportunityScore = Math.round(clamp(raw) * 100);
+    const confidence = toConfidence(opportunityScore, signalStrength, recencyDays);
+
     return {
       id: `operator-${operator.id}-${category.toLowerCase().replace(/\s+/g, "-")}`,
       entityType: "operator" as const,
@@ -131,10 +184,12 @@ function scoreOperator(
       countyName,
       demandCategory: category,
       opportunityScore,
-      confidence: toConfidence(opportunityScore),
-      rationale: rationaleForOperator(operator, category, opportunityScore),
+      confidence,
+      activityAt,
+      signalStrength: Math.round(signalStrength * 100) / 100,
+      rationale: `Activity model: ${category} demand from operator footprint — ${operator.permitsYtd} permits YTD, ${operator.rigs} rigs, ${countyName} county heat ${Math.round(heat * 100)}%.`,
     };
-  }).filter((o) => o.opportunityScore >= 45);
+  });
 }
 
 function buildSummary(opportunities: ServiceOpportunity[]): OpportunitiesSummary {
@@ -156,6 +211,10 @@ function buildSummary(opportunities: ServiceOpportunity[]): OpportunitiesSummary
   };
 }
 
+/**
+ * Scores service demand from real permit and operator activity.
+ * Weighted field-services model — no random/mock seeding.
+ */
 export function scoreOpportunitiesFromActivity(
   permits: Permit[],
   operators: Operator[],
@@ -164,21 +223,22 @@ export function scoreOpportunitiesFromActivity(
   for (const p of permits) {
     countyPermitCounts.set(p.countyName, (countyPermitCounts.get(p.countyName) ?? 0) + 1);
   }
+  const countyHeat = buildCountyHeat(countyPermitCounts);
 
-  const permitOpps = permits.flatMap(scorePermit);
-
-  const operatorOpps = operators.flatMap((op) => {
-    const focusCounty = op.focus?.split("/")[0]?.trim() ?? "McKenzie";
-    const county =
-      [...countyPermitCounts.keys()].find(
-        (c) => c.toLowerCase() === focusCounty.toLowerCase(),
-      ) ?? focusCounty;
-    return scoreOperator(op, county, countyPermitCounts.get(county) ?? op.permitsYtd);
+  const permitOpps = permits.flatMap((p) => {
+    const heat = countyHeat.get(p.countyName) ?? 0.3;
+    return scorePermit(p, heat).opportunities;
   });
 
-  const opportunities = [...permitOpps, ...operatorOpps]
-    .sort((a, b) => b.opportunityScore - a.opportunityScore)
-    .slice(0, 120);
+  const operatorOpps = operators.flatMap((op) => {
+    const county = operatorPrimaryCounty(op, permits, countyHeat);
+    const heat = countyHeat.get(county) ?? 0.3;
+    return scoreOperator(op, county, heat, permits);
+  });
+
+  const opportunities = [...permitOpps, ...operatorOpps].sort(
+    (a, b) => b.opportunityScore - a.opportunityScore,
+  );
 
   return {
     opportunities,
@@ -186,7 +246,6 @@ export function scoreOpportunitiesFromActivity(
   };
 }
 
-/** Fallback when no permit/operator rows are available. */
 export function mockOpportunities(): OpportunitiesData {
   const mockPermits: Permit[] = [
     {

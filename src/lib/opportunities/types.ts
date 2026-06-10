@@ -13,6 +13,8 @@ export type ConfidenceLevel = "low" | "medium" | "high";
 
 export type OpportunityEntityType = "permit" | "operator";
 
+export type OpportunitySortKey = "score" | "activity" | "county" | "operator";
+
 export interface ServiceOpportunity {
   id: string;
   entityType: OpportunityEntityType;
@@ -23,7 +25,10 @@ export interface ServiceOpportunity {
   demandCategory: DemandCategory;
   opportunityScore: number;
   confidence: ConfidenceLevel;
+  /** ISO timestamp for sorting by recent activity */
+  activityAt: string;
   rationale: string;
+  signalStrength: number;
 }
 
 export interface OpportunitiesSummary {
@@ -36,4 +41,22 @@ export interface OpportunitiesSummary {
 export interface OpportunitiesData {
   opportunities: ServiceOpportunity[];
   summary: OpportunitiesSummary;
+}
+
+export interface SavedLead extends ServiceOpportunity {
+  savedAt: string;
+}
+
+export interface SavedLeadsSummary {
+  count: number;
+  avgScore: number;
+  categories: Partial<Record<DemandCategory, number>>;
+}
+
+export interface OpportunityFilters {
+  county: string;
+  operator: string;
+  demandCategory: string;
+  confidence: string;
+  minScore: number;
 }
